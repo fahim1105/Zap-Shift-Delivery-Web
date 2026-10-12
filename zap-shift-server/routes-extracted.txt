@@ -1,0 +1,339 @@
+app.get('/users', async (req, res) => {
+    const { usersCollection } = await getCollections();
+    const searchText = req.query.searchText || '';
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const query = {};
+
+    if (searchText) {
+        query.$or = [
+            { displayName: { $regex: searchText, $options: 'i' } },
+            { email: { $regex: searchText, $options: 'i' } }
+        ];
+    }
+
+    const totalUsers = await await connectToDatabase().then(db => db.usersCollection).countDocuments(query);
+    const result = await await connectToDatabase().then(db => db.usersCollection).find(query).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray();
+
+    res.send({ result, totalUsers });
+});
+
+
+app.get('/users/:id', async (req, res) => {
+
+})
+
+app.get('/users/:email/role', async (req, res) => {
+    const email = req.params.email;
+    const query = { email };
+    const user = await await connectToDatabase().then(db => db.usersCollection).findOne(query);
+    res.send({ role: user?.role || 'user' })
+})
+
+app.post('/users', async (req, res) => {
+    const user = req.body;
+    user.role = 'user';
+    user.createdAt = new Date();
+    const email = user.email;
+    const userExist = await await connectToDatabase().then(db => db.usersCollection).findOne({ email })
+    if (userExist) {
+        return res.send({ message: "User exist" });
+    }
+
+    const result = await await connectToDatabase().then(db => db.usersCollection).insertOne(user);
+    res.send(result);
+})
+
+app.patch('/users/:id/role', VerifyFirebaseToken, verifyAdmin, async (req, res) => {
+    const id = req.params.id;
+    const roleInfo = req.body;
+    const query = { _id: new ObjectId(id) };
+    const updateDocs = {
+        $set: {
+            role: roleInfo.role
+        }
+    }
+    const result = await await connectToDatabase().then(db => db.usersCollection).updateOne(query, updateDocs);
+    res.send(result);
+})
+
+app.delete('/users/:id', async (req, res) => {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+
+    const result = await await connectToDatabase().then(db => db.usersCollection).deleteOne(query);
+    res.send(result);
+})
+
+
+// Parcel API
+app.get('/parcels', async (req, res) => {
+    const query = {}
+    const { email, deliveryStatus } = req.query;
+    // parcels?email''&
+    if (email) {
+        query.senderEmail = email;
+    }
+    if (deliveryStatus) {
+        query.deliveryStatus = deliveryStatus;
+    }
+
+    const options = { sort: { createdAt: -1 } }
+
+    const cursor = parcelCollection.find(query, options)
+    const result = await cursor.toArray();
+    res.send(result);
+});
+
+app.get('/parcels/rider', async (req, res) => {
+    const { riderEmail, deliveryStatus } = req.query;
+    // console.log(riderEmail, deliveryStatus)
+    const query = {};
+    if (riderEmail) {
+        query.riderEmail = riderEmail;
+    }
+    if (deliveryStatus) {
+        query.deliveryStatus = deliveryStatus;
+    }
+    // console.log(query)
+
+    // const cursor = parcelCollection.find(query);
+    // const result = await cursor.toArray();
+    const result = await parcelCollection.find(query).toArray();
+    res.send(result);
+})
+
+app.get('/parcels/:id', async (req, res) => {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    const result = await parcelCollection.findOne(query);
+    res.send(result);
+})
+
+app.post('/parcels', async (req, res) => {
+    const parcel = req.body;
+    // Parcel Created Time 
+    parcel.createdAt = new Date();
+    const result = await parcelCollection.insertOne(parcel);
+    res.send(result);
+});
+
+app.patch('/parcels/:id', async (req, res) => {
+    const { riderId, riderName, riderEmail, riderPhone } = req.body;
+    const id = req.params;
+    const query = { _id: new ObjectId(id) };
+    const updatedDocs = {
+        $set: {
+            riderId: riderId,
+            riderName: riderName,
+            riderEmail: riderEmail,
+            riderPhone: riderPhone,
+            deliveryStatus: 'driver-assigned'
+        }
+    }
+    const result = await parcelCollection.updateOne(query, updatedDocs);
+
+    // Update rider information 
+
+    const riderQuery = { _id: new ObjectId(riderId) };
+    const riderUpdatedDocs = {
+        $set: {
+            workStatus: 'in_delivery'
+        }
+    }
+    const riderResult = await ridersCollection.updateOne(riderQuery, riderUpdatedDocs);
+    res.send(riderResult)
+})
+
+app.delete('/parcels/:id', async (req, res) => {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+
+    const result = await parcelCollection.deleteOne(query);
+    res.send(result);
+})
+
+// Payment Related API
+app.post('/create-checkout-session', async (req, res) => {
+    const paymentInfo = req.body;
+    const amount = parseInt(paymentInfo.cost) * 100;
+
+    const session = await stripe.checkout.sessions.create({
+        line_items: [
+            {
+                price_data: {
+                    currency: 'USD',
+                    unit_amount: amount,
+                    product_data: {
+                        name: `Please pay for ${paymentInfo.parcelName}`
+                    }
+                },
+                quantity: 1,
+            },
+        ],
+        customer_email: paymentInfo.senderEmail,
+        mode: 'payment',
+        metadata: {
+            parcelId: paymentInfo.parcelId,
+            parcelName: paymentInfo.parcelName,
+        },
+        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+    })
+    // console.log(session)
+    res.send({ url: session.url });
+})
+
+app.patch('/payment-success', async (req, res) => {
+    const sessionId = req.body.session_id;
+    // console.log('Session is ', sessionId);
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    // console.log('Session retrieve', session)
+
+    // doing for not repeat double time the payment history >>> repeat for the use effect in client site we need to control from backend
+    const transactionId = session.payment_intent; // take the transaction  id 
+    const query = { transactionId: transactionId } // check the id on database
+
+    const paymentExist = await paymentCollection.findOne(query);
+    console.log(paymentExist);
+
+    if (paymentExist) {
+        return res.send({
+            message: "Already exist",
+            transactionId,
+            trackingId: paymentExist.trackingId
+        })
+    }
+
+    const trackingId = generateTrackingId()
+
+    if (session.payment_status === 'paid') {
+        const id = session.metadata.parcelId;
+        const query = { _id: new ObjectId(id) };
+        const update = {
+            $set: {
+                paymentStatus: 'paid',
+                deliveryStatus: 'pending-pickup',
+                trackingId: trackingId
+            }
+        }
+        const result = await parcelCollection.updateOne(query, update);
+
+        const payment = {
+            amount: session.amount_total / 100,
+            currency: session.currency,
+            customer_email: session.customer_email,
+            parcelID: session.metadata.parcelID,
+            parcelName: session.metadata.parcelName,
+            transactionId: session.payment_intent,
+            paymentStatus: session.payment_status,
+            paidAt: new Date(),
+            trackingId: trackingId
+        }
+
+        if (session.payment_status === 'paid') {
+            const paymentResult = await paymentCollection.insertOne(payment)
+            res.send({
+                success: true,
+                modifyParcel: result,
+                trackingId: trackingId,
+                transactionId: session.payment_intent,
+                paymentInfo: paymentResult
+            })
+        }
+        // res.send(result);
+    }
+    res.send({ success: false })
+})
+
+app.get('/payments', VerifyFirebaseToken, async (req, res) => {
+    const email = req.query.email;
+    const query = {};
+    // console.log('Header &&', req.headers)
+    if (email) {
+        query.customer_email = email;
+
+        // Check email address
+
+        if (email !== req.decoded_email) {
+            return res.status(403).send({ message: "Forbidden access" })
+        }
+    }
+    const cursor = paymentCollection.find(query).sort({ paidAt: -1 });
+    const result = await cursor.toArray();
+    res.send(result)
+})
+
+app.delete('/payments', async (req, res) => {
+    // const id = req.params.id;
+    // const query = { _id: new ObjectId(id) };
+
+    const result = await paymentCollection.deleteMany();
+    res.send(result);
+})
+
+// Rider related API
+
+app.get('/riders', async (req, res) => {
+    const { status, district, workStatus } = req.query;
+    const query = {};
+    if (status) {
+        query.status = status
+    }
+    if (district) {
+        query.District = district
+    }
+    if (workStatus) {
+        query.workStatus = workStatus
+    }
+    const cursor = ridersCollection.find(query).sort({ createdAT: 1 });
+
+    const result = await cursor.toArray();
+    res.send(result);
+})
+
+app.post('/riders', async (req, res) => {
+    const rider = req.body;
+    rider.status = 'pending';
+    rider.createdAT = new Date();
+
+    const result = await ridersCollection.insertOne(rider);
+    res.send(result);
+})
+
+app.patch('/riders/:id', VerifyFirebaseToken, async (req, res) => {
+    const status = req.body.status;
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+    const updatedDocs = {
+        $set: {
+            status: status,
+            workStatus: 'available'
+        }
+    }
+    const result = await ridersCollection.updateOne(query, updatedDocs);
+
+    if (status === 'approved') {
+        const email = req.body.email;
+        const userQuery = { email };
+        const updateUser = {
+            $set: {
+                role: 'rider'
+            }
+        }
+        const uerResult = await await connectToDatabase().then(db => db.usersCollection).updateOne(userQuery, updateUser);
+    }
+
+    res.send(result);
+})
+
+app.delete('/riders/:id', async (req, res) => {
+    const id = req.params.id;
+    const query = { _id: new ObjectId(id) };
+
+    const result = await ridersCollection.deleteOne(query);
+    res.send(result);
+})
