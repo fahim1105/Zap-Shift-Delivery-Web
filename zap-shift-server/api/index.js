@@ -503,7 +503,14 @@ app.get('/', (req, res) => {
     res.send('Let\'s start Zap-Shift 🚀');
 });
 
+// For local development
+if (process.env.NODE_ENV !== 'production') {
+    const port = process.env.PORT || 3000;
+    app.listen(port, () => {
+        console.log(`Server running on port ${port}`);
+    });
+}
+
 // Export as serverless function for Vercel
-// This is required for Vercel to properly handle the Express app
+// Vercel requires this specific export format
 module.exports = app;
-module.exports.default = app;
