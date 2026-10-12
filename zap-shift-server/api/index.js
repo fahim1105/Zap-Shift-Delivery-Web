@@ -504,4 +504,6 @@ app.get('/', (req, res) => {
 });
 
 // Export as serverless function for Vercel
+// This is required for Vercel to properly handle the Express app
 module.exports = app;
+module.exports.default = app;
