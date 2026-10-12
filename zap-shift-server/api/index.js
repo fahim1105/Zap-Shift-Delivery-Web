@@ -17,7 +17,7 @@ function generateTrackingId() {
 
 // Firebase SDK
 const admin = require("firebase-admin");
-const serviceAccount = require("./zap-shift-firebase-adminsdk.json");
+const serviceAccount = require("../zap-shift-firebase-adminsdk.json");
 
 if (!admin.apps.length) {
     admin.initializeApp({
