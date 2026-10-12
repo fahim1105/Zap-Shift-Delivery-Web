@@ -14,7 +14,7 @@ function generateTrackingId() {
     const prefix = "ZAP";
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const random = crypto.randomBytes(3).toString("hex").toUpperCase();
-    return \`\${prefix}-\${date}-\${random}\`;
+    return `${prefix}-${date}-${random}`;
 }
 
 // Firebase SDK
@@ -45,7 +45,7 @@ const VerifyFirebaseToken = async (req, res, next) => {
     }
 }
 
-const uri = \`mongodb+srv://\${process.env.DB_user}:\${process.env.DB_pass}@cluster0.mcccn4v.mongodb.net/?appName=Cluster0\`;
+const uri = `mongodb+srv://${process.env.DB_user}:${process.env.DB_pass}@cluster0.mcccn4v.mongodb.net/?appName=Cluster0`;
 
 const client = new MongoClient(uri, {
     serverApi: {
