@@ -68,53 +68,52 @@ const client = new MongoClient(uri, {
     }
 });
 
+// Global database connection promise
+let dbConnection = null;
 
-async function run() {
-    try {
-        // Connect the client to the server	(optional starting in v4.7)
-        await client.connect();
+async function connectToDatabase() {
+    if (dbConnection) {
+        return dbConnection;
+    }
+    
+    dbConnection = client.connect().then(() => {
+        console.log("Connected to MongoDB!");
+        return client.db('zap_shift_db');
+    });
+    
+    return dbConnection;
+}
 
-        const db = client.db('zap_shift_db');
-        const parcelCollection = db.collection('parcels');
-        const paymentCollection = db.collection('payments');
-        const usersCollection = db.collection('users');
-        const ridersCollection = db.collection('riders');
+// Get collections
+async function getCollections() {
+    const db = await connectToDatabase();
+    return {
+        parcelCollection: db.collection('parcels'),
+        paymentCollection: db.collection('payments'),
+        usersCollection: db.collection('users'),
+        ridersCollection: db.collection('riders')
+    };
+}
 
-        // middleWare with database access >> admin before allowing admin activity
-        // Must be used after VerifyFirebaseToken middleWare
+// middleWare with database access >> admin before allowing admin activity
+// Must be used after VerifyFirebaseToken middleWare
+const verifyAdmin = async (req, res, next) => {
+    const { usersCollection } = await getCollections();
+    const email = req.decoded_email;
+    const query = { email };
+    const user = await usersCollection.findOne(query);
 
-        const verifyAdmin = async (req, res, next) => {
-            const email = req.decoded_email;
-            const query = { email };
-            const user = await usersCollection.findOne(query);
+    if (!user || user.role !== 'admin') {
+        return res.send({ message: "Forbidden access" })
+    }
 
-            if (!user || user.role !== 'admin') {
-                res.send({ message: "Forbidden access" })
-            }
-
-            next()
-        }
+    next()
+}
 
         // User Related Api
 
-        // app.get('/users', async (req, res) => {
-        //     const searchText = req.query.searchText;
-        //     const query = {};
-
-        //     if (searchText) {
-        //         // // use regex for finding name when search and use option for ignore cases (UpperCase/LowerCase) >>> use $or for search email or name
-        //         query.$or = [
-        //             { displayName: { $regex: searchText, $options: 'i' } },
-        //             { email: { $regex: searchText, $options: 'i' } }
-        //         ]
-        //     }
-
-        //     const cursor = usersCollection.find(query).sort({ createdAt: -1 }).limit(10);
-        //     const result = await cursor.toArray();
-        //     res.send(result);
-        // })
-
         app.get('/users', async (req, res) => {
+            const { usersCollection } = await getCollections();
             const searchText = req.query.searchText || '';
             const page = parseInt(req.query.page) || 1;
             const limit = parseInt(req.query.limit) || 10;
@@ -462,6 +461,59 @@ async function run() {
     }
 }
 run().catch(console.dir);
+
+
+app.get('/', (req, res) => {
+    res.send('Zap is shifting now!')
+})
+
+// For local development
+if (process.env.VERCEL !== '1') {
+    app.listen(port, () => {
+        console.log(`Example app listening on port ${port}`)
+    })
+}
+
+// Export for Vercel serverless
+module.exports = app;
+// Global connection cache for serverless
+let cachedDb = null;
+
+async function connectToDatabase() {
+    if (cachedDb) {
+        return cachedDb;
+    }
+    
+    await client.connect();
+    const db = client.db('zap_shift_db');
+    
+    cachedDb = {
+        parcelCollection: db.collection('parcels'),
+        paymentCollection: db.collection('payments'),
+        usersCollection: db.collection('users'),
+        ridersCollection: db.collection('riders')
+    };
+    
+    console.log("Connected to MongoDB!");
+    return cachedDb;
+}
+
+// Middleware for admin (updated to use connectToDatabase)
+const verifyAdmin = async (req, res, next) => {
+    const { usersCollection } = await connectToDatabase();
+    const email = req.decoded_email;
+    const query = { email };
+    const user = await usersCollection.findOne(query);
+
+    if (!user || user.role !== 'admin') {
+        return res.send({ message: "Forbidden access" })
+    }
+
+    next()
+}
+
+
+
 
 
 app.get('/', (req, res) => {
