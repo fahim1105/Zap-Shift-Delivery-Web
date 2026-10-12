@@ -1,5 +1,5 @@
 // Local development server
-const app = require('./api/[...slug]');
+const app = require('./api/index');
 const port = process.env.PORT || 3000;
 
 app.listen(port, () => {
