@@ -19,7 +19,7 @@ function generateTrackingId() {
     return `${prefix}-${date}-${random}`;
 }
 
-module.exports = generateTrackingId;
+// Don't export here - we'll export the app at the end
 
 // Firebase SDK
 const admin = require("firebase-admin");
@@ -468,6 +468,12 @@ app.get('/', (req, res) => {
     res.send('Zap is shifting now!')
 })
 
-app.listen(port, () => {
-    console.log(`Example app listening on port ${port}`)
-})
+// For local development
+if (process.env.VERCEL !== '1') {
+    app.listen(port, () => {
+        console.log(`Example app listening on port ${port}`)
+    })
+}
+
+// Export for Vercel serverless
+module.exports = app;
